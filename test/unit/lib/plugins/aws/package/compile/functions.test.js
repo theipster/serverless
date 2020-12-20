@@ -1811,6 +1811,24 @@ describe('lib/plugins/aws/package/compile/functions/index.test.js', () => {
               handler: 'trigger.handler',
               destinations: { onSuccess: 'arn:aws:lambda:us-east-1:12313231:function:external' },
             },
+            fnDestinationsSnsTopicByRef: {
+              handler: 'trigger.handler',
+              destinations: {
+                onFailure: { Ref: 'snsFailureTopic' },
+              },
+            },
+            fnDestinationsSqsQueueByFnGetAttArn: {
+              handler: 'trigger.handler',
+              destinations: {
+                onFailure: { 'Fn::GetAtt': ['sqsFailureQueue', 'Arn'] },
+              },
+            },
+            fnDestinationsEventBusByFnGetAttArn: {
+              handler: 'trigger.handler',
+              destinations: {
+                onFailure: { 'Fn::GetAtt': ['failureEventBus', 'Arn'] },
+              },
+            },
             fnDisabledLogs: { handler: 'trigger.handler', disableLogs: true },
             fnMaximumEventAge: { handler: 'trigger.handler', maximumEventAge: 3600 },
             fnMaximumRetryAttempts: { handler: 'trigger.handler', maximumRetryAttempts: 0 },
@@ -1829,6 +1847,22 @@ describe('lib/plugins/aws/package/compile/functions/index.test.js', () => {
             fnImage: {
               image:
                 '000000000000.dkr.ecr.sa-east-1.amazonaws.com/test-lambda-docker@sha256:6bb600b4d6e1d7cf521097177dd0c4e9ea373edb91984a505333be8ac9455d38',
+            },
+          },
+          resources: {
+            Resources: {
+              failureEventBus: {
+                Type: 'AWS::Events::EventBus',
+                Properties: {
+                  Name: 'failure-bus',
+                },
+              },
+              snsFailureTopic: {
+                Type: 'AWS::SNS::Topic',
+              },
+              sqsFailureQueue: {
+                Type: 'AWS::SQS::Queue',
+              },
             },
           },
         },
@@ -2086,6 +2120,60 @@ describe('lib/plugins/aws/package/compile/functions/index.test.js', () => {
       });
     });
 
+    it('should support `functions[].destinations.onFailure` referencing SNS topic via Ref', () => {
+      const destinationConfig =
+        cfResources[naming.getLambdaEventConfigLogicalId('fnDestinationsSnsTopicByRef')].Properties
+          .DestinationConfig;
+
+      expect(destinationConfig).to.deep.equal({
+        OnFailure: {
+          Destination: { Ref: 'snsFailureTopic' },
+        },
+      });
+
+      expect(iamRolePolicyStatements).to.deep.include({
+        Effect: 'Allow',
+        Action: 'sns:Publish',
+        Resource: { Ref: 'snsFailureTopic' },
+      });
+    });
+
+    it('should support `functions[].destinations.onFailure` referencing SQS queue via Fn::GetAtt Arn', () => {
+      const destinationConfig =
+        cfResources[naming.getLambdaEventConfigLogicalId('fnDestinationsSqsQueueByFnGetAttArn')]
+          .Properties.DestinationConfig;
+
+      expect(destinationConfig).to.deep.equal({
+        OnFailure: {
+          Destination: { 'Fn::GetAtt': ['sqsFailureQueue', 'Arn'] },
+        },
+      });
+
+      expect(iamRolePolicyStatements).to.deep.include({
+        Effect: 'Allow',
+        Action: 'sqs:SendMessage',
+        Resource: { 'Fn::GetAtt': ['sqsFailureQueue', 'Arn'] },
+      });
+    });
+
+    it('should support `functions[].destinations.onFailure` referencing EventBridge event bus via Fn::GetAtt Arn', () => {
+      const destinationConfig =
+        cfResources[naming.getLambdaEventConfigLogicalId('fnDestinationsEventBusByFnGetAttArn')]
+          .Properties.DestinationConfig;
+
+      expect(destinationConfig).to.deep.equal({
+        OnFailure: {
+          Destination: { 'Fn::GetAtt': ['failureEventBus', 'Arn'] },
+        },
+      });
+
+      expect(iamRolePolicyStatements).to.deep.include({
+        Effect: 'Allow',
+        Action: 'events:PutEvents',
+        Resource: { 'Fn::GetAtt': ['failureEventBus', 'Arn'] },
+      });
+    });
+
     it('should support `functions[].disableLogs`', () => {
       expect(cfResources[naming.getLambdaLogicalId('fnDisabledLogs')]).to.not.have.property(
         'DependsOn'
@@ -2171,6 +2259,50 @@ describe('lib/plugins/aws/package/compile/functions/index.test.js', () => {
         cliArgs: ['package'],
       }).catch(error => {
         expect(error).to.have.property('code', 'LAMBDA_FILE_SYSTEM_CONFIG_MISSING_VPC');
+      });
+    });
+
+    it('should throw error when `functions[].destinations.onFailure` refers to an unrecognized resource via Ref', () => {
+      return runServerless({
+        fixture: 'functionDestinations',
+        cliArgs: ['package'],
+        configExt: {
+          functions: {
+            fnDestinationsWithUndefinedRef: {
+              handler: 'trigger.handler',
+              destinations: {
+                onFailure: { Ref: 'someUndefinedRef' },
+              },
+            },
+          },
+        },
+      }).catch(error => {
+        expect(error).to.have.property(
+          'message',
+          'Unrecognized destination target someUndefinedRef'
+        );
+      });
+    });
+
+    it('should throw error when `functions[].destinations.onFailure` refers to an unrecognized resource via Fn::GetAtt', () => {
+      return runServerless({
+        fixture: 'functionDestinations',
+        cliArgs: ['package'],
+        configExt: {
+          functions: {
+            fnDestinationsWithUndefinedFnGetAtt: {
+              handler: 'trigger.handler',
+              destinations: {
+                onFailure: { 'Fn::GetAtt': ['someUndefinedRef', 'Arn'] },
+              },
+            },
+          },
+        },
+      }).catch(error => {
+        expect(error).to.have.property(
+          'message',
+          'Unrecognized destination target someUndefinedRef'
+        );
       });
     });
   });
