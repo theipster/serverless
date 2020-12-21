@@ -291,8 +291,8 @@ functions:
       - MyThing
       - MyOtherThing
     destinations: # optional, destinations for async invocations
-      onSuccess: functionName # function name or ARN of a target (externally managed lambda, EventBridge event bus, SQS queue or SNS topic)
-      onFailure: xxx:xxx:target # function name or ARN of a target (externally managed lambda, EventBridge event bus, SQS queue or SNS topic)
+      onSuccess: functionName # function name or ARN (Ref, Fn::GetAtt also supported) of a target: externally managed lambda, EventBridge event bus, SQS queue or SNS topic
+      onFailure: xxx:xxx:target # function name or ARN (Ref, Fn::GetAtt also supported) of a target: externally managed lambda, EventBridge event bus, SQS queue or SNS topic
     fileSystemConfig:
       arn: arn:aws:elasticfilesystem:us-east-1:111111111111:access-point/fsap-a1a1a1a1a1a1a1a1a # ARN of EFS Access Point
       localMountPath: /mnt/example # path under which EFS will be mounted and accessible by Lambda function
